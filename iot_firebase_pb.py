@@ -26,9 +26,9 @@ print("登入成功，uid =", user["localId"])
 
 # ✅ 新增一筆 product
 new_product = {
-    "table_id": 1,
+    "table_id": 2,
     "name": "noodled",
-    "number": 10,
+    "number": 100,
     "id": 0,
 }
 db.child("product").push(new_product, id_token)
@@ -42,17 +42,17 @@ for item in products.each():
 
 key_to_update = "-Oe6MUUnY2-Sa_pBKz95"
 
-db.child("product").child(key_to_update).update({
-    "name": "noodle",   # 也可以改成別的
-    "number": 500,       # 改數量
-    "table_id": 1,
-    "id": 0
-}, id_token)
+# db.child("product").child(key_to_update).update({
+#     "name": "noodle",   # 也可以改成別的
+#     "number": 500,       # 改數量
+#     "table_id": 1,
+#     "id": 0
+# }, id_token)
 
-print("已更新 noodle 這一筆")
+# print("已更新 noodle 這一筆")
 
-# ✅ 讀取全部 product
-products = db.child("product").get(id_token)
-print("目前 product：")
-for item in products.each():
-    print(item.key(), "=>", item.val())
+# # ✅ 讀取全部 product
+# products = db.child("product").get(id_token)
+# print("目前 product：")
+# for item in products.each():
+#     print(item.key(), "=>", item.val())
