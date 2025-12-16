@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <title>庫存看板</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f4f4f5;
+      margin: 0;
+      padding: 20px;
+    }
+    .container {
+      max-width: 980px;
+      margin: 0 auto;
+      background: #ffffff;
+      border-radius: 12px;
+      padding: 24px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.05);
+    }
+    h1 {
+      margin-top: 0;
+      margin-bottom: 10px;
+      font-size: 24px;
+      text-align: center;
+    }
+    .subtitle {
+      text-align: center;
+      color: #6b7280;
+      margin-bottom: 18px;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    a.link {
+      color: #2563eb;
+      text-decoration: none;
+    }
+    a.link:hover { text-decoration: underline; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+    thead { background: #f9fafb; }
+    th, td {
+      padding: 10px 12px;
+      border-bottom: 1px solid #e5e7eb;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      font-weight: 600;
+      color: #4b5563;
+    }
+    tr:nth-child(even) td { background-color: #fafafa; }
+    tr.clickable { cursor: pointer; }
+    tr.clickable:hover td { background: #f3f4f6; }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      background: #eef2ff;
+      color: #4338ca;
+      white-space: nowrap;
+    }
+    .badge-warn {
+      background: #fef3c7;
+      color: #92400e;
+    }
+    .badge-danger {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+
+    .qty-ok  { color: #16a34a; font-weight: 600; }
+    .qty-low { color: #f97316; font-weight: 600; }
+    .qty-out { color: #dc2626; font-weight: 600; }
+
+    #status {
+      margin-top: 10px;
+      font-size: 12px;
+      color: #6b7280;
+      text-align: right;
+    }
+
+    /* Modal */
+    .overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.35);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+    .modal {
+      width: min(760px, 100%);
+      background: #fff;
+      border-radius: 14px;
+      box-shadow: 0 18px 60px rgba(0,0,0,0.25);
+      overflow: hidden;
+    }
+    .modal-header {
+      padding: 14px 16px;
+      background: #f9fafb;
+      border-bottom: 1px solid #e5e7eb;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .modal-title {
+      font-weight: 700;
+      font-size: 15px;
+      color: #111827;
+    }
+    .modal-close {
+      border: none;
+      background: #111827;
+      color: #fff;
+      border-radius: 999px;
+      padding: 6px 10px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .modal-body {
+      padding: 16px;
+      display: grid;
+      gap: 12px;
+    }
+    .kv {
+      display: grid;
+      grid-template-columns: 140px 1fr;
+      gap: 8px 12px;
+      font-size: 14px;
+    }
+    .k { color: #6b7280; }
+    .v { color: #111827; }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>貨架庫存看板</h1>
+    <div class="subtitle">
+      顯示目前每個貨架上的商品與剩餘數量（Realtime Database 即時更新）<br />
+      點選任一列可顯示「位置 / 貨架資料（position）」<br />
+      <a class="link" href="IOT_manage_custom.html" target="_blank">👉 前往管理後台</a>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>貨架 rack_id</th>
+          <th>商品名稱</th>
+          <th>剩餘數量</th>
+          <th>狀態</th>
+        </tr>
+      </thead>
+      <tbody id="inventory-body"></tbody>
+    </table>
+
+    <div id="status">正在連線 Firebase…</div>
+  
+    <hr style="margin:18px 0;border:none;border-top:1px solid #e5e7eb;" />
+    <h2 style="margin:0 0 10px 0;font-size:18px;">銷售分析（依 Update_time + sell）</h2>
+    <div style="display:grid;grid-template-columns:1fr;gap:14px;">
+      <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;">
+        <label style="font-size:14px;color:#374151;">
+          看最近
+          <select id="days-select" style="margin:0 6px;padding:6px 8px;border:1px solid #e5e7eb;border-radius:10px;">
+            <option value="7">7 天</option>
+            <option value="14">14 天</option>
+            <option value="30" selected>30 天</option>
+            <option value="99999">全部</option>
+          </select>
+        </label>
+        <span id="best-seller" class="badge" style="background:#ecfeff;color:#155e75;">計算中…</span>
+        <span style="font-size:12px;color:#6b7280;">（sell 視為該筆資料的銷量；會依 Update_time 篩選）</span>
+      </div>
+
+      <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:14px;padding:12px;">
+        <div style="font-weight:700;font-size:14px;margin-bottom:8px;color:#111827;">各商品總銷量（Top 10）</div>
+        <canvas id="sales-bar" height="140"></canvas>
+      </div>
+
+      <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:14px;padding:12px;">
+        <div style="font-weight:700;font-size:14px;margin-bottom:8px;color:#111827;">最佳商品：每日銷量趨勢</div>
+        <canvas id="sales-line" height="140"></canvas>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Modal -->
+  <div class="overlay" id="overlay">
+    <div class="modal" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <div class="modal-title" id="modal-title">位置資訊</div>
+        <button class="modal-close" id="modal-close">關閉</button>
+      </div>
+      <div class="modal-body" id="modal-body"></div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-app.js";
+    import { getDatabase, ref, onValue } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-database.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyCcnUT8TN1RuiOBifEqEznRlogNrwX-sI0",
+      authDomain: "ntuiot-f7743.firebaseapp.com",
+      databaseURL: "https://ntuiot-f7743-default-rtdb.firebaseio.com",
+      projectId: "ntuiot-f7743",
+      storageBucket: "ntuiot-f7743.firebasestorage.app",
+      messagingSenderId: "224195625096",
+      appId: "1:224195625096:web:a0bcbefcf733f6b8d35f3d",
+      measurementId: "G-VPMLNE6BF5"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db  = getDatabase(app);
+
+    const tbody = document.getElementById("inventory-body");
+    const statusEl = document.getElementById("status");
+
+    const overlay = document.getElementById("overlay");
+    const modalClose = document.getElementById("modal-close");
+    const modalTitle = document.getElementById("modal-title");
+    const modalBody = document.getElementById("modal-body");
+
+    modalClose.addEventListener("click", () => overlay.style.display = "none");
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.style.display = "none"; });
+
+    let productData = {};
+    let racksData = {};
+
+    onValue(ref(db, "product"), (snap) => {
+      productData = snap.val() || {};
+      render();
+      renderAnalytics();
+      statusEl.textContent = "資料已更新：" + new Date().toLocaleString();
+    }, (err) => {
+      console.error(err);
+      statusEl.textContent = "讀取 product 失敗：" + err.message;
+    });
+
+    onValue(ref(db, "racks"), (snap) => {
+      racksData = snap.val() || {};
+      render();
+      renderAnalytics();
+      statusEl.textContent = "資料已更新：" + new Date().toLocaleString();
+    }, (err) => {
+      console.error(err);
+      statusEl.textContent = "讀取 racks 失敗：" + err.message;
+    });
+
+    function render() {
+      tbody.innerHTML = "";
+
+      const rows = Object.entries(productData || {}).map(([key, item]) => {
+        const rackId = (item?.product_id ?? "-");
+        const name = item?.product ?? "(未命名商品)";
+        const qty = Number(item?.number ?? 0);
+
+        let qtyClass = "qty-ok";
+        if (qty === 0) qtyClass = "qty-out";
+        else if (qty <= 5) qtyClass = "qty-low";
+
+        let statusHtml = `<span class="badge">正常</span>`;
+        if (qty === 0) statusHtml = `<span class="badge badge-danger">需要補貨</span>`;
+        else if (qty <= 5) statusHtml = `<span class="badge badge-warn">快沒了</span>`;
+
+        return { key, rackId: String(rackId), name: String(name), qty, qtyClass, statusHtml };
+      });
+
+      rows.sort((a, b) => (a.rackId.localeCompare(b.rackId, "zh-Hant")) || a.name.localeCompare(b.name, "zh-Hant"));
+
+      for (const r of rows) {
+        const tr = document.createElement("tr");
+        tr.classList.add("clickable");
+        tr.dataset.key = r.key;
+
+        tr.innerHTML = `
+          <td><span class="badge">${escapeHtml(r.rackId)}</span></td>
+          <td>${escapeHtml(r.name)}</td>
+          <td class="${r.qtyClass}">${r.qty}</td>
+          <td>${r.statusHtml}</td>
+        `;
+
+        tr.addEventListener("click", () => showPosition(r.key));
+        tbody.appendChild(tr);
+      }
+    }
+
+    function showPosition(productKey) {
+      const item = productData?.[productKey];
+      if (!item) return;
+
+      const rackId = String(item?.product_id ?? "-");
+const name = String(item?.product ?? "(未命名商品)");
+const qty = Number(item?.number ?? 0);
+
+      // match rack meta by rack_id
+      const rackEntry = Object.values(racksData || {}).find(r => String(r?.rack_id ?? "") === rackId);
+      const weight = rackEntry?.weight ?? null;
+      const height = rackEntry?.height ?? null;
+      const products = Array.isArray(rackEntry?.products) ? rackEntry.products : [];
+      const drinks = Array.isArray(rackEntry?.drinks) ? rackEntry.drinks : [];
+
+      const isDrink = drinks.includes(name);
+      const isFood = products.includes(name);
+
+      modalTitle.textContent = `位置資訊（rack_id: ${rackId}）`;
+
+      modalBody.innerHTML = `
+        <div class="kv">
+          <div class="k">商品</div><div class="v">${escapeHtml(name)}</div>
+          <div class="k">數量</div><div class="v">${qty}${qty === 0 ? ' <span class="badge badge-danger">需要補貨</span>' : ''}</div>
+          <div class="k">位置（position）</div><div class="v"><span class="badge">${escapeHtml(rackId)}</span></div>
+          <div class="k">分類</div>
+          <div class="v">
+            ${isDrink ? '<span class="badge">飲品</span>' : ''}
+            ${isFood ? '<span class="badge">食物</span>' : ''}
+            ${(!isDrink && !isFood) ? '<span class="badge badge-warn">未在貨架清單中</span>' : ''}
+          </div>
+
+          <div class="k">貨架 weight</div><div class="v">${weight ?? '-'}${isDrink ? ' <span class="badge">飲品用</span>' : ''}</div>
+          <div class="k">貨架 height</div><div class="v">${height ?? '-'}${isFood ? ' <span class="badge">食物用</span>' : ''}</div>
+
+          <div class="k">可放食物</div>
+          <div class="v">
+            <div class="chips">${(products.length ? products : ['-']).map(x => `<span class="badge">${escapeHtml(String(x))}</span>`).join(' ')}</div>
+          </div>
+
+          <div class="k">可放飲品</div>
+          <div class="v">
+            <div class="chips">${(drinks.length ? drinks : ['-']).map(x => `<span class="badge">${escapeHtml(String(x))}</span>`).join(' ')}</div>
+          </div>
+        </div>
+      `;
+
+      overlay.style.display = "flex";
+    }
+
+
+    // ====== 銷售分析（Chart.js）======
+    let chartBar = null;
+    let chartLine = null;
+
+    const daysSelect = document.getElementById("days-select");
+    const bestSellerEl = document.getElementById("best-seller");
+
+    daysSelect?.addEventListener("change", () => renderAnalytics());
+
+    function parseUpdateTime(t) {
+      // 支援 "YYYY-MM-DD HH:mm:ss" 或 ISO 字串
+      if (!t) return null;
+      const s = String(t).trim();
+      // "2025-12-16 21:53:53" -> "2025-12-16T21:53:53"
+      const isoLike = s.includes("T") ? s : s.replace(" ", "T");
+      const d = new Date(isoLike);
+      return isNaN(d.getTime()) ? null : d;
+    }
+
+    function toYMD(d) {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      return `${y}-${m}-${day}`;
+    }
+
+    function filterByDays(records, days) {
+      if (!days || days >= 99999) return records;
+      const now = new Date();
+      const start = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+      return records.filter(r => r.time && r.time >= start && r.time <= now);
+    }
+
+    async function ensureChartJS() {
+      if (window.Chart) return window.Chart;
+      // 用 ESM 動態載入（避免重複載入）
+      const mod = await import("https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js");
+      // UMD 會掛在 window.Chart
+      return window.Chart;
+    }
+
+    async function renderAnalytics() {
+      try {
+        const Chart = await ensureChartJS();
+
+        // 1) 把 productData 轉成 records
+        const records = Object.values(productData || {}).map(item => {
+          const name = String(item?.product ?? "(未命名商品)");
+          const sell = Number(item?.sell ?? 0);
+          const time = parseUpdateTime(item?.Update_time ?? item?.Update_time ?? item?.update_time ?? item?.UpdateTime ?? item?.Update_time);
+          // 你的欄位是 Update_time；保險起見多容錯
+          const t2 = time ?? parseUpdateTime(item?.Update_time);
+          return { name, sell: isNaN(sell) ? 0 : sell, time: t2 };
+        }).filter(r => r.name);
+
+        const days = Number(daysSelect?.value ?? 30);
+        const filtered = filterByDays(records, days);
+
+        // 2) 聚合：每個商品總銷量
+        const sumByProduct = new Map();
+        for (const r of filtered) {
+          const prev = sumByProduct.get(r.name) ?? 0;
+          sumByProduct.set(r.name, prev + (r.sell || 0));
+        }
+
+        const sorted = Array.from(sumByProduct.entries()).sort((a,b) => b[1] - a[1]);
+        const top = sorted.slice(0, 10);
+
+        const best = top[0];
+        if (best) {
+          bestSellerEl.textContent = `最好賣：${best[0]}（總銷量 ${best[1]}）`;
+        } else {
+          bestSellerEl.textContent = "沒有可分析的資料";
+        }
+
+        // 3) Bar chart（Top 10）
+        const barLabels = top.map(x => x[0]);
+        const barData = top.map(x => x[1]);
+
+        const barCtx = document.getElementById("sales-bar");
+        if (chartBar) chartBar.destroy();
+        chartBar = new Chart(barCtx, {
+          type: "bar",
+          data: {
+            labels: barLabels,
+            datasets: [{ label: "總銷量", data: barData }]
+          },
+          options: {
+            responsive: true,
+            plugins: {
+              legend: { display: false },
+              tooltip: { enabled: true }
+            },
+            scales: {
+              x: { ticks: { maxRotation: 45, minRotation: 0 } },
+              y: { beginAtZero: true }
+            }
+          }
+        });
+
+        // 4) Line chart：最佳商品每日銷量趨勢
+        const bestName = best?.[0];
+        const byDay = new Map(); // ymd -> sum
+        if (bestName) {
+          for (const r of filtered) {
+            if (r.name !== bestName) continue;
+            const day = r.time ? toYMD(r.time) : "未知日期";
+            byDay.set(day, (byDay.get(day) ?? 0) + (r.sell || 0));
+          }
+        }
+
+        const daySeries = Array.from(byDay.entries()).sort((a,b) => a[0].localeCompare(b[0]));
+        const lineLabels = daySeries.map(x => x[0]);
+        const lineData = daySeries.map(x => x[1]);
+
+        const lineCtx = document.getElementById("sales-line");
+        if (chartLine) chartLine.destroy();
+        chartLine = new Chart(lineCtx, {
+          type: "line",
+          data: {
+            labels: lineLabels,
+            datasets: [{ label: bestName ? `${bestName} 每日銷量` : "每日銷量", data: lineData, tension: 0.25 }]
+          },
+          options: {
+            responsive: true,
+            plugins: { legend: { display: true } },
+            scales: { y: { beginAtZero: true } }
+          }
+        });
+      } catch (e) {
+        console.error(e);
+        bestSellerEl.textContent = "分析失敗（Chart.js 載入或資料格式問題）";
+      }
+    }
+
+
+    function escapeHtml(str) {
+      return String(str)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+  </script>
+</body>
+</html>
