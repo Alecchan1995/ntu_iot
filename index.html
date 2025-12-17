@@ -173,6 +173,7 @@
         <label style="font-size:14px;color:#374151;">
           看最近
           <select id="days-select" style="margin:0 6px;padding:6px 8px;border:1px solid #e5e7eb;border-radius:10px;">
+            <option value="1">今天</option>
             <option value="7">7 天</option>
             <option value="14">14 天</option>
             <option value="30" selected>30 天</option>
@@ -183,14 +184,20 @@
         <span style="font-size:12px;color:#6b7280;">（sell 視為該筆資料的銷量；會依 Update_time 篩選）</span>
       </div>
 
-      <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:14px;padding:12px;">
-        <div style="font-weight:700;font-size:14px;margin-bottom:8px;color:#111827;">各商品總銷量（Top 10）</div>
-        <canvas id="sales-bar" height="140"></canvas>
+      <div style="background:linear-gradient(180deg,#ffffff 0%,#f9fafb 100%);border:1px solid #e5e7eb;border-radius:16px;padding:14px;box-shadow:0 8px 24px rgba(0,0,0,0.04);height:280px;">
+        <div style="font-weight:800;font-size:14px;margin-bottom:10px;color:#111827;display:flex;justify-content:space-between;align-items:center;">
+          <span>各商品總銷量（Top 10）</span>
+          <span style="font-weight:600;font-size:12px;color:#6b7280;">依時間篩選加總</span>
+        </div>
+        <canvas id="sales-bar"></canvas>
       </div>
 
-      <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:14px;padding:12px;">
-        <div style="font-weight:700;font-size:14px;margin-bottom:8px;color:#111827;">最佳商品：每日銷量趨勢</div>
-        <canvas id="sales-line" height="140"></canvas>
+      <div style="background:linear-gradient(180deg,#ffffff 0%,#f9fafb 100%);border:1px solid #e5e7eb;border-radius:16px;padding:14px;box-shadow:0 8px 24px rgba(0,0,0,0.04);height:280px;">
+        <div style="font-weight:800;font-size:14px;margin-bottom:10px;color:#111827;display:flex;justify-content:space-between;align-items:center;">
+          <span>最佳商品：每日銷量趨勢</span>
+          <span style="font-weight:600;font-size:12px;color:#6b7280;">按日加總</span>
+        </div>
+        <canvas id="sales-line"></canvas>
       </div>
     </div>
 
@@ -207,9 +214,12 @@
     </div>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-app.js";
     import { getDatabase, ref, onValue } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-database.js";
+
 
     const firebaseConfig = {
       apiKey: "AIzaSyCcnUT8TN1RuiOBifEqEznRlogNrwX-sI0",
@@ -262,10 +272,31 @@
     function render() {
       tbody.innerHTML = "";
 
-      const rows = Object.entries(productData || {}).map(([key, item]) => {
-        const rackId = (item?.product_id ?? "-");
-        const name = item?.product ?? "(未命名商品)";
+      // 依 (rack_id = product_id) + 商品名稱(product) 去重，只顯示最新一筆（Update_time 最大）
+      const latestByKey = new Map();
+
+      for (const [key, item] of Object.entries(productData || {})) {
+        const rackId = String(item?.product_id ?? "-");
+        const name = String(item?.product ?? "(未命名商品)");
         const qty = Number(item?.number ?? 0);
+
+        const t = parseUpdateTime(item?.Update_time ?? item?.update_time ?? item?.UpdateTime);
+        const groupKey = `${rackId}||${name}`;
+
+        const prev = latestByKey.get(groupKey);
+        if (!prev) {
+          latestByKey.set(groupKey, { key, rackId, name, qty, time: t, raw: item });
+        } else {
+          const prevTime = prev.time ? prev.time.getTime() : -Infinity;
+          const curTime = t ? t.getTime() : -Infinity;
+          if (curTime >= prevTime) {
+            latestByKey.set(groupKey, { key, rackId, name, qty, time: t, raw: item });
+          }
+        }
+      }
+
+      const rows = Array.from(latestByKey.values()).map(r0 => {
+        const qty = Number(r0.qty ?? 0);
 
         let qtyClass = "qty-ok";
         if (qty === 0) qtyClass = "qty-out";
@@ -275,10 +306,16 @@
         if (qty === 0) statusHtml = `<span class="badge badge-danger">需要補貨</span>`;
         else if (qty <= 5) statusHtml = `<span class="badge badge-warn">快沒了</span>`;
 
-        return { key, rackId: String(rackId), name: String(name), qty, qtyClass, statusHtml };
+        return { ...r0, qty, qtyClass, statusHtml };
       });
 
-      rows.sort((a, b) => (a.rackId.localeCompare(b.rackId, "zh-Hant")) || a.name.localeCompare(b.name, "zh-Hant"));
+      // 最新優先：先依時間倒序，再依 rackId/name
+      rows.sort((a, b) => {
+        const at = a.time ? a.time.getTime() : -Infinity;
+        const bt = b.time ? b.time.getTime() : -Infinity;
+        if (bt !== at) return bt - at;
+        return (a.rackId.localeCompare(b.rackId, "zh-Hant")) || a.name.localeCompare(b.name, "zh-Hant");
+      });
 
       for (const r of rows) {
         const tr = document.createElement("tr");
@@ -321,6 +358,7 @@ const qty = Number(item?.number ?? 0);
         <div class="kv">
           <div class="k">商品</div><div class="v">${escapeHtml(name)}</div>
           <div class="k">數量</div><div class="v">${qty}${qty === 0 ? ' <span class="badge badge-danger">需要補貨</span>' : ''}</div>
+          <div class="k">更新時間</div><div class="v">${escapeHtml(String(item?.Update_time ?? item?.update_time ?? item?.UpdateTime ?? "-"))}</div>
           <div class="k">位置（position）</div><div class="v"><span class="badge">${escapeHtml(rackId)}</span></div>
           <div class="k">分類</div>
           <div class="v">
@@ -377,21 +415,23 @@ const qty = Number(item?.number ?? 0);
     function filterByDays(records, days) {
       if (!days || days >= 99999) return records;
       const now = new Date();
+
+      // days=1：只看今天（從今天 00:00:00 到現在）
+      if (days === 1) {
+        const start = new Date(now);
+        start.setHours(0, 0, 0, 0);
+        return records.filter(r => r.time && r.time >= start && r.time <= now);
+      }
+
       const start = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
       return records.filter(r => r.time && r.time >= start && r.time <= now);
     }
 
-    async function ensureChartJS() {
-      if (window.Chart) return window.Chart;
-      // 用 ESM 動態載入（避免重複載入）
-      const mod = await import("https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js");
-      // UMD 會掛在 window.Chart
-      return window.Chart;
-    }
+    function ensureChartJS() { return window.Chart; }
 
     async function renderAnalytics() {
       try {
-        const Chart = await ensureChartJS();
+        const ChartCtor = ensureChartJS();
 
         // 1) 把 productData 轉成 records
         const records = Object.values(productData || {}).map(item => {
@@ -429,7 +469,7 @@ const qty = Number(item?.number ?? 0);
 
         const barCtx = document.getElementById("sales-bar");
         if (chartBar) chartBar.destroy();
-        chartBar = new Chart(barCtx, {
+        chartBar = new ChartCtor(barCtx, {
           type: "bar",
           data: {
             labels: barLabels,
@@ -437,13 +477,21 @@ const qty = Number(item?.number ?? 0);
           },
           options: {
             responsive: true,
+            maintainAspectRatio: false,
+            animation: { duration: 450 },
             plugins: {
               legend: { display: false },
-              tooltip: { enabled: true }
+              tooltip: { mode: "index", intersect: false }
             },
             scales: {
-              x: { ticks: { maxRotation: 45, minRotation: 0 } },
-              y: { beginAtZero: true }
+              x: {
+                grid: { display: false },
+                ticks: { maxRotation: 35, minRotation: 0 }
+              },
+              y: {
+                beginAtZero: true,
+                grid: { drawBorder: false }
+              }
             }
           }
         });
@@ -465,7 +513,7 @@ const qty = Number(item?.number ?? 0);
 
         const lineCtx = document.getElementById("sales-line");
         if (chartLine) chartLine.destroy();
-        chartLine = new Chart(lineCtx, {
+        chartLine = new ChartCtor(lineCtx, {
           type: "line",
           data: {
             labels: lineLabels,
@@ -473,8 +521,21 @@ const qty = Number(item?.number ?? 0);
           },
           options: {
             responsive: true,
-            plugins: { legend: { display: true } },
-            scales: { y: { beginAtZero: true } }
+            maintainAspectRatio: false,
+            interaction: { mode: "index", intersect: false },
+            animation: { duration: 450 },
+            plugins: {
+              legend: { display: true },
+              tooltip: { mode: "index", intersect: false }
+            },
+            scales: {
+              x: { grid: { display: false } },
+              y: { beginAtZero: true, grid: { drawBorder: false } }
+            },
+            elements: {
+              line: { tension: 0.35, borderWidth: 2 },
+              point: { radius: 3, hoverRadius: 5 }
+            }
           }
         });
       } catch (e) {
